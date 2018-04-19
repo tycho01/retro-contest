@@ -5,4 +5,6 @@ __cache__
 *.eggs
 VERSION.txt
 roms
-
+*.bk2
+*.mp4
+*.ipynb_checkpoints
