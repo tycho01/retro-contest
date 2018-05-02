@@ -106,7 +106,7 @@ def run(game, state=None, entry=None, **kwargs):
         raise
 
     try:
-        volumes = {name: {'bind': '/root/compo/tmp/sock{0}'.format(num)} for num, name in socket_vols.items()}
+        volumes = {volume.name: {'bind': '/root/compo/tmp/sock{0}'.format(num)} for num, volume in socket_vols.items()}
         agent = client.containers.run(agent_name, agent_command,
                                       volumes={**volumes, **agentmount},
                                       runtime=kwargs.get('runtime', 'nvidia'),
