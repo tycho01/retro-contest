@@ -221,6 +221,9 @@ def run_args(args):
     if args.remote_env:
         kwargs['remote_env'] = args.remote_env
 
+    if args.num_envs:
+        kwargs['num_envs'] = args.num_envs
+
     results = run(args.game, args.state, args.entry, **kwargs)
     if results['remote'][0] or results['agent'][0]:
         if results['remote'][0]:
