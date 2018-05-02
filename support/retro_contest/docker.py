@@ -47,7 +47,7 @@ def run(game, state=None, entry=None, **kwargs):
     client = docker.from_env()
     remote_command = ['retro-contest-remote', 'run', game, *([state] if state else []), '-b', 'results/bk2', '-m', 'results']
     remote_name = kwargs.get('remote_env', 'openai/retro-env')
-    num_envs = int(kwargs.get('num_envs', 1))
+    num_envs = kwargs.get('num_envs', 1)
     agent_command = []
     agent_name = kwargs.get('agent', 'agent')
     datamount = {}
