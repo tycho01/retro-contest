@@ -47,6 +47,7 @@ def run(game, state=None, entry=None, **kwargs):
     client = docker.from_env()
     remote_command = ['retro-contest-remote', 'run', game, *([state] if state else []), '-b', 'results/bk2', '-m', 'results']
     remote_name = kwargs.get('remote_env', 'openai/retro-env')
+    num_envs = int(kwargs.get('num_envs', 1))
     agent_command = []
     agent_name = kwargs.get('agent', 'agent')
     datamount = {}
@@ -63,8 +64,6 @@ def run(game, state=None, entry=None, **kwargs):
         if kwargs.get('entry_args'):
             agent_command.extend(kwargs['entry_args'])
 
-    rand = ''.join(random.sample('abcdefghijklmnopqrstuvwxyz0123456789', 8))
-    volname = 'retro-contest-tmp%s' % rand
     datamount = {}
     agentmount = {}
     if kwargs.get('resultsdir'):
@@ -86,30 +85,35 @@ def run(game, state=None, entry=None, **kwargs):
     if kwargs.get('agent_shm'):
         agent_kwargs['shm_size'] = kwargs['agent_shm']
 
-    bridge = client.volumes.create(volname, driver='local', driver_opts={'type': 'tmpfs', 'device': 'tmpfs'})
     if kwargs.get('use_host_data'):
         remote_command = [remote_command[0], '--data-dir', '/root/data', *remote_command[1:]]
         datamount[convert_path(data_path())] = {'bind': '/root/data', 'mode': 'ro'}
 
     try:
-        remote = client.containers.run(remote_name, remote_command,
-                                       volumes={volname: {'bind': '/root/compo/tmp'},
-                                                **datamount},
-                                       **remote_kwargs)
+        socket_vols = {}
+        remotes = []
+        for i in range(num_envs):
+            rand = ''.join(random.sample('abcdefghijklmnopqrstuvwxyz0123456789', 8))
+            volname = 'retro-contest-tmp%s' % rand
+            socket_vols[i] = client.volumes.create(volname, driver='local', driver_opts={'type': 'tmpfs', 'device': 'tmpfs'})
+            remote = client.containers.run(remote_name, remote_command,
+                                           volumes={volname: {'bind': '/root/compo/tmp/sock'},
+                                                    **datamount},
+                                           **remote_kwargs)
+            remotes.append(remote)
     except:
-        bridge.remove()
+        [socket_vol.remove() for socket_vol in socket_vols.values()]
         raise
 
     try:
+        volumes = {name: {'bind': '/root/compo/tmp/sock{0}'.format(num)} for (num, name) in socket_vols}
         agent = client.containers.run(agent_name, agent_command,
-                                      volumes={volname: {'bind': '/root/compo/tmp'},
-                                                **agentmount},
+                                      volumes={**volumes, **agentmount},
                                       runtime=kwargs.get('runtime', 'nvidia'),
                                       **agent_kwargs)
     except:
-        remote.kill()
-        remote.remove()
-        bridge.remove()
+        [remote.kill(); remote.remove() for remote in remotes]
+        [socket_vol.remove() for socket_vol in socket_vols.values()]
         raise
 
     a_exit = None
@@ -141,7 +145,7 @@ def run(game, state=None, entry=None, **kwargs):
             try:
                 r_exit = remote.wait(timeout=10)
             except requests.exceptions.RequestException:
-                remote.kill()
+                [remote.kill(); remote.remove() for remote in remotes]
     except:
         if a_exit is None:
             try:
@@ -156,7 +160,7 @@ def run(game, state=None, entry=None, **kwargs):
                 r_exit = remote.wait(timeout=1)
             except:
                 try:
-                    remote.kill()
+                    [remote.kill(); remote.remove() for remote in remotes]
                 except docker.errors.APIError:
                     pass
         raise
@@ -184,9 +188,9 @@ def run(game, state=None, entry=None, **kwargs):
             with open(os.path.join(results, 'agent-stderr.txt'), 'w') as f:
                 f.write(logs['agent'][2].decode('utf-8'))
 
-        remote.remove()
+        [remote.kill(); remote.remove() for remote in remotes]
         agent.remove()
-        bridge.remove()
+        [socket_vol.remove() for socket_vol in socket_vols.values()]
 
     return logs
 
@@ -291,6 +295,7 @@ def init_parser(subparsers):
     parser_run.add_argument('--wallclock-limit', '-W', type=float, default=None, help='Maximum time to run in seconds')
     parser_run.add_argument('--timestep-limit', '-T', type=int, default=None, help='Maximum time to run in timesteps')
     parser_run.add_argument('--no-nv', '-N', action='store_true', help='Disable Nvidia runtime')
+    parser_run.add_argument('--num-envs', '-n', type=int, default=None, help='Number of remote environments')
     parser_run.add_argument('--remote-env', '-R', type=str, help='Remote Docker image')
     parser_run.add_argument('--results-dir', '-r', type=str, help='Path to output results')
     parser_run.add_argument('--agent-dir', '-o', type=str, help='Path to mount into agent (mounted at /root/compo/out)')
