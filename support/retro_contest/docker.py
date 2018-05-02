@@ -112,7 +112,9 @@ def run(game, state=None, entry=None, **kwargs):
                                       runtime=kwargs.get('runtime', 'nvidia'),
                                       **agent_kwargs)
     except:
-        [remote.kill(); remote.remove() for remote in remotes]
+        for remote in remotes:
+            remote.kill()
+            remote.remove() 
         [socket_vol.remove() for socket_vol in socket_vols.values()]
         raise
 
@@ -145,7 +147,9 @@ def run(game, state=None, entry=None, **kwargs):
             try:
                 r_exit = remote.wait(timeout=10)
             except requests.exceptions.RequestException:
-                [remote.kill(); remote.remove() for remote in remotes]
+                for remote in remotes:
+                    remote.kill()
+                    remote.remove() 
     except:
         if a_exit is None:
             try:
@@ -160,7 +164,9 @@ def run(game, state=None, entry=None, **kwargs):
                 r_exit = remote.wait(timeout=1)
             except:
                 try:
-                    [remote.kill(); remote.remove() for remote in remotes]
+                    for remote in remotes:
+                        remote.kill()
+                        remote.remove() 
                 except docker.errors.APIError:
                     pass
         raise
@@ -188,7 +194,9 @@ def run(game, state=None, entry=None, **kwargs):
             with open(os.path.join(results, 'agent-stderr.txt'), 'w') as f:
                 f.write(logs['agent'][2].decode('utf-8'))
 
-        [remote.kill(); remote.remove() for remote in remotes]
+        for remote in remotes:
+            remote.kill()
+            remote.remove() 
         agent.remove()
         [socket_vol.remove() for socket_vol in socket_vols.values()]
 
