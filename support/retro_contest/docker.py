@@ -147,9 +147,7 @@ def run(game, state=None, entry=None, **kwargs):
             try:
                 r_exit = remote.wait(timeout=10)
             except requests.exceptions.RequestException:
-                for remote in remotes:
-                    remote.kill()
-                    remote.remove() 
+                [remote.kill() for remote in remotes]
     except:
         if a_exit is None:
             try:
@@ -164,9 +162,7 @@ def run(game, state=None, entry=None, **kwargs):
                 r_exit = remote.wait(timeout=1)
             except:
                 try:
-                    for remote in remotes:
-                        remote.kill()
-                        remote.remove() 
+                    [remote.kill() for remote in remotes]
                 except docker.errors.APIError:
                     pass
         raise
