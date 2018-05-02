@@ -89,16 +89,16 @@ def run(game, state=None, entry=None, **kwargs):
         remote_command = [remote_command[0], '--data-dir', '/root/data', *remote_command[1:]]
         datamount[convert_path(data_path())] = {'bind': '/root/data', 'mode': 'ro'}
 
+    socket_vols = {}
+    remotes = []
+
     try:
-        socket_vols = {}
-        remotes = []
         for i in range(num_envs):
             rand = ''.join(random.sample('abcdefghijklmnopqrstuvwxyz0123456789', 8))
             volname = 'retro-contest-tmp%s' % rand
             socket_vols[i] = client.volumes.create(volname, driver='local', driver_opts={'type': 'tmpfs', 'device': 'tmpfs'})
             remote = client.containers.run(remote_name, remote_command,
-                                           volumes={volname: {'bind': '/root/compo/tmp/sock'},
-                                                    **datamount},
+                                           volumes={volname: {'bind': '/root/compo/tmp/sock'}, **datamount},
                                            **remote_kwargs)
             remotes.append(remote)
     except:
@@ -119,7 +119,7 @@ def run(game, state=None, entry=None, **kwargs):
         raise
 
     a_exit = None
-    r_exit = None
+    r_exits = [None] * len(remotes)
 
     if not kwargs.get('quiet'):
         log_thread = LogThread(agent)
@@ -132,22 +132,29 @@ def run(game, state=None, entry=None, **kwargs):
                 break
             except requests.exceptions.RequestException:
                 pass
-            try:
-                r_exit = remote.wait(timeout=5)
+
+            found_server_error = False
+            for i, remote in enumerate(remotes):
+                try:
+                    r_exits[i] = remote.wait(timeout=5)
+                    found_server_error = True
+                except requests.exceptions.RequestException:
+                    pass
+            if found_server_error:
                 break
-            except requests.exceptions.RequestException:
-                pass
 
         if a_exit is None:
             try:
                 a_exit = agent.wait(timeout=10)
             except requests.exceptions.RequestException:
                 agent.kill()
-        if r_exit is None:
-            try:
-                r_exit = remote.wait(timeout=10)
-            except requests.exceptions.RequestException:
-                [remote.kill() for remote in remotes]
+
+        for i, (r_exit, remote) in enumerate(zip(r_exits, remotes)):
+            if r_exit is None:
+                try:
+                    r_exits[i] = remote.wait(timeout=10)
+                except requests.exceptions.RequestException:
+                    remote.kill()
     except:
         if a_exit is None:
             try:
@@ -157,34 +164,40 @@ def run(game, state=None, entry=None, **kwargs):
                     agent.kill()
                 except docker.errors.APIError:
                     pass
-        if r_exit is None:
-            try:
-                r_exit = remote.wait(timeout=1)
-            except:
+
+        for i, (r_exit, remote) in enumerate(zip(r_exits, remotes)):
+            if r_exit is None:
                 try:
-                    [remote.kill() for remote in remotes]
-                except docker.errors.APIError:
-                    pass
+                    r_exits[i] = remote.wait(timeout=1)
+                except:
+                    try:
+                        remote.kill()
+                    except docker.errors.APIError:
+                        pass
+
         raise
     finally:
         if isinstance(a_exit, dict):
             a_exit = a_exit.get('StatusCode')
-        if isinstance(r_exit, dict):
-            r_exit = r_exit.get('StatusCode')
+        for i, r_exit in enumerate(r_exits):
+            if isinstance(r_exit, dict):
+                r_exits[i] = r_exit.get('StatusCode')
 
         if not kwargs.get('quiet'):
             log_thread.exit()
 
+        remote_logs = {'remote{0}'.format(i): (r_exit, remote.logs(stdout=True, stderr=False), remote.logs(stdout=False, stderr=True)) for i, (r_exit, remote) in enumerate(zip(r_exits, remotes))}
         logs = {
-            'remote': (r_exit, remote.logs(stdout=True, stderr=False), remote.logs(stdout=False, stderr=True)),
+            **remote_logs,
             'agent': (a_exit, agent.logs(stdout=True, stderr=False), agent.logs(stdout=False, stderr=True))
         }
 
         if results:
-            with open(os.path.join(results, 'remote-stdout.txt'), 'w') as f:
-                f.write(logs['remote'][1].decode('utf-8'))
-            with open(os.path.join(results, 'remote-stderr.txt'), 'w') as f:
-                f.write(logs['remote'][2].decode('utf-8'))
+            for i in range(len(remotes)):
+                with open(os.path.join(results, 'remote{0}-stdout.txt'.format(i)), 'w') as f:
+                    f.write(logs['remote{0}'.format(i)][1].decode('utf-8'))
+                with open(os.path.join(results, 'remote{0}-stderr.txt'.format(i)), 'w') as f:
+                    f.write(logs['remote{0}'.format(i)][2].decode('utf-8'))
             with open(os.path.join(results, 'agent-stdout.txt'), 'w') as f:
                 f.write(logs['agent'][1].decode('utf-8'))
             with open(os.path.join(results, 'agent-stderr.txt'), 'w') as f:
