@@ -90,7 +90,7 @@ def run(game, state=None, entry=None, **kwargs):
         agent_kwargs['shm_size'] = kwargs['agent_shm']
 
     if kwargs.get('use_host_data'):
-        remote_commands = list(map(lambda x: x = [x[0], '--data-dir', '/root/data', *x[1:]], remote_commands))
+        remote_commands = list(map(lambda x: [x[0], '--data-dir', '/root/data', *x[1:]], remote_commands))
         datamount[convert_path(data_path())] = {'bind': '/root/data', 'mode': 'ro'}
 
     socket_vols = {}
