@@ -45,7 +45,11 @@ def convert_path(path):
 
 def run(game, state=None, entry=None, **kwargs):
     client = docker.from_env()
-    remote_command = ['retro-contest-remote', 'run', game, *([state] if state else []), '-b', 'results/bk2', '-m', 'results']
+
+    remote_commands = []
+    for game, state in zip(str.split(game), str.split(state)):
+        remote_commands.append(['retro-contest-remote', 'run', game, *([state] if state else []), '-b', 'results/bk2', '-m', 'results'])
+
     remote_name = kwargs.get('remote_env', 'openai/retro-env')
     num_envs = kwargs.get('num_envs', 1)
     agent_command = []
@@ -53,11 +57,11 @@ def run(game, state=None, entry=None, **kwargs):
     datamount = {}
 
     if kwargs.get('wallclock_limit') is not None:
-        remote_command.extend(['-W', str(kwargs['wallclock_limit'])])
+        map(lambda x: x.extend(['-W', str(kwargs['wallclock_limit'])]), remote_commands)
     if kwargs.get('timestep_limit') is not None:
-        remote_command.extend(['-T', str(kwargs['timestep_limit'])])
+        map(lambda x: x.extend(['-T', str(kwargs['timestep_limit'])]), remote_commands)
     if kwargs.get('discrete_actions'):
-        remote_command.extend(['-D'])
+        map(lambda x: x.extend(['-D']), remote_commands)
 
     if entry:
         agent_command.append(entry)
@@ -86,7 +90,7 @@ def run(game, state=None, entry=None, **kwargs):
         agent_kwargs['shm_size'] = kwargs['agent_shm']
 
     if kwargs.get('use_host_data'):
-        remote_command = [remote_command[0], '--data-dir', '/root/data', *remote_command[1:]]
+        remote_commands = list(map(lambda x: x = [x[0], '--data-dir', '/root/data', *x[1:]], remote_commands))
         datamount[convert_path(data_path())] = {'bind': '/root/data', 'mode': 'ro'}
 
     socket_vols = {}
@@ -97,7 +101,7 @@ def run(game, state=None, entry=None, **kwargs):
             rand = ''.join(random.sample('abcdefghijklmnopqrstuvwxyz0123456789', 8))
             volname = 'retro-contest-tmp%s' % rand
             socket_vols[i] = client.volumes.create(volname, driver='local', driver_opts={'type': 'tmpfs', 'device': 'tmpfs'})
-            remote = client.containers.run(remote_name, remote_command,
+            remote = client.containers.run(remote_name, remote_commands[i],
                                            volumes={volname: {'bind': '/root/compo/tmp/sock'}, **datamount},
                                            **remote_kwargs)
             remotes.append(remote)
@@ -114,7 +118,7 @@ def run(game, state=None, entry=None, **kwargs):
     except:
         for remote in remotes:
             remote.kill()
-            remote.remove() 
+            remote.remove()
         [socket_vol.remove() for socket_vol in socket_vols.values()]
         raise
 
@@ -205,7 +209,7 @@ def run(game, state=None, entry=None, **kwargs):
 
         for remote in remotes:
             remote.kill()
-            remote.remove() 
+            remote.remove()
         agent.remove()
         [socket_vol.remove() for socket_vol in socket_vols.values()]
 
