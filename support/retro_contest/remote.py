@@ -28,6 +28,7 @@ def run(game, state,
             return
 
     env = make(game, state, bk2dir, monitordir, discrete_actions, socketdir)
+    print("Running game: " + str(game) + " on level: " + str(state))
     env.serve(timestep_limit=timestep_limit, wallclock_limit=wallclock_limit, ignore_reset=True)
 
 
