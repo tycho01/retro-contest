@@ -101,6 +101,7 @@ def run(game, state=None, entry=None, **kwargs):
             rand = ''.join(random.sample('abcdefghijklmnopqrstuvwxyz0123456789', 8))
             volname = 'retro-contest-tmp%s' % rand
             socket_vols[i] = client.volumes.create(volname, driver='local', driver_opts={'type': 'tmpfs', 'device': 'tmpfs'})
+            print("Remote command " + str(i) + " " + str(remote_commmands[i]))
             remote = client.containers.run(remote_name, remote_commands[i],
                                            volumes={volname: {'bind': '/root/compo/tmp/sock'}, **datamount},
                                            **remote_kwargs)
