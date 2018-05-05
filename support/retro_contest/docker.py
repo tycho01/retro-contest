@@ -49,12 +49,10 @@ def run(game, state=None, entry=None, **kwargs):
     remote_commands = []
     for game, state in zip(str.split(game), str.split(state)):
         remote_commands.append(['retro-contest-remote', 'run', game, *([state] if state else []), '-b', 'results/bk2', '-m', 'results'])
-
     remote_name = kwargs.get('remote_env', 'openai/retro-env')
     num_envs = kwargs.get('num_envs', 1)
     agent_command = []
     agent_name = kwargs.get('agent', 'agent')
-    datamount = {}
 
     if kwargs.get('wallclock_limit') is not None:
         map(lambda x: x.extend(['-W', str(kwargs['wallclock_limit'])]), remote_commands)
@@ -252,17 +250,25 @@ def run_args(args):
     if args.remote_env:
         kwargs['remote_env'] = args.remote_env
 
-    if args.num_envs:
-        kwargs['num_envs'] = args.num_envs
+    num_envs = args.num_envs if args.num_envs else 1
+    kwargs['num_envs'] = num_envs
 
     results = run(args.game, args.state, args.entry, **kwargs)
-    if results['remote'][0] or results['agent'][0]:
-        if results['remote'][0]:
-            print('Remote exited uncleanly:', results['remote'][0])
-        if results['agent'][0]:
-            print('Agent exited uncleanly', results['agent'][0])
-        return False
-    return True
+
+    exited_cleanly = True
+
+    a_exit = results['agent'][0]
+    if a_exit:
+        print('Agent exited uncleanly', a_exit)
+        exited_cleanly = False
+
+    for i in range(len(num_envs)):
+        r_exit = results['remote{0}'.format(i)][0]
+        if r_exit:
+            print('Remote {0} exited uncleanly:'.format(i), r_exit)
+            exited_cleanly = False
+
+    return exited_cleanly
 
 
 def build(path, tag, install=None, pass_env=False):
