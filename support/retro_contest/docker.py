@@ -106,8 +106,11 @@ def run(game, state=None, entry=None, **kwargs):
                 pass
 
     def remove_socket_vols():
-        [socket_vol.remove() for socket_vol in socket_vols]
-        client.volumes.prune()
+        for socket_vol in socket_vols:
+            try:
+                socket_vol.remove()
+            except:
+                pass
 
     try:
         for i in range(num_envs):
@@ -131,8 +134,8 @@ def run(game, state=None, entry=None, **kwargs):
                                       runtime=kwargs.get('runtime', 'nvidia'),
                                       **agent_kwargs)
     except:
-        remote_socket_vols()
         remove_remotes()
+        remove_socket_vols()
         raise
 
     a_exit = None
@@ -220,9 +223,9 @@ def run(game, state=None, entry=None, **kwargs):
             with open(os.path.join(results, 'agent-stderr.txt'), 'w') as f:
                 f.write(logs['agent'][2].decode('utf-8'))
 
-        remove_socket_vols()
         remove_remotes()
         agent.remove(v=True)
+        remove_socket_vols()
 
     return logs
 
