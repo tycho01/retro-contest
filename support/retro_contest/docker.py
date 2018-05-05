@@ -262,7 +262,7 @@ def run_args(args):
         print('Agent exited uncleanly', a_exit)
         exited_cleanly = False
 
-    for i in range(len(num_envs)):
+    for i in range(num_envs):
         r_exit = results['remote{0}'.format(i)][0]
         if r_exit:
             print('Remote {0} exited uncleanly:'.format(i), r_exit)
