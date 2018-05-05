@@ -120,8 +120,12 @@ def run(game, state=None, entry=None, **kwargs):
         for remote in remotes:
             try:
                 remote.kill()
+            except:
+                pass
             try:
                 remote.remove()
+            except:
+                pass
 
         [socket_vol.remove() for socket_vol in socket_vols.values()]
         raise
@@ -214,8 +218,12 @@ def run(game, state=None, entry=None, **kwargs):
         for remote in remotes:
             try:
                 remote.kill()
+            except:
+                pass
             try:
                 remote.remove()
+            except:
+                pass
         agent.remove()
         [socket_vol.remove() for socket_vol in socket_vols.values()]
 
