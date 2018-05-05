@@ -91,41 +91,48 @@ def run(game, state=None, entry=None, **kwargs):
         remote_commands = list(map(lambda x: [x[0], '--data-dir', '/root/data', *x[1:]], remote_commands))
         datamount[convert_path(data_path())] = {'bind': '/root/data', 'mode': 'ro'}
 
-    socket_vols = {}
     remotes = []
+    socket_vols = []
 
-    try:
-        for i in range(num_envs):
-            rand = ''.join(random.sample('abcdefghijklmnopqrstuvwxyz0123456789', 8))
-            volname = 'retro-contest-tmp%s' % rand
-            socket_vols[i] = client.volumes.create(volname, driver='local', driver_opts={'type': 'tmpfs', 'device': 'tmpfs'})
-            print("Remote command " + str(i) + " " + str(remote_commands[i]))
-            remote = client.containers.run(remote_name, remote_commands[i],
-                                           volumes={volname: {'bind': '/root/compo/tmp/sock'}, **datamount},
-                                           **remote_kwargs)
-            remotes.append(remote)
-    except:
-        [socket_vol.remove() for socket_vol in socket_vols.values()]
-        raise
-
-    try:
-        volumes = {volume.name: {'bind': '/root/compo/tmp/sock{0}'.format(num)} for num, volume in socket_vols.items()}
-        agent = client.containers.run(agent_name, agent_command,
-                                      volumes={**volumes, **agentmount},
-                                      runtime=kwargs.get('runtime', 'nvidia'),
-                                      **agent_kwargs)
-    except:
+    def remove_remotes():
         for remote in remotes:
             try:
                 remote.kill()
             except:
                 pass
             try:
-                remote.remove()
+                remote.remove(v=True)
             except:
                 pass
 
-        [socket_vol.remove() for socket_vol in socket_vols.values()]
+    def remove_socket_vols():
+        [socket_vol.remove() for socket_vol in socket_vols]
+        client.volumes.prune()
+
+    try:
+        for i in range(num_envs):
+            rand = ''.join(random.sample('abcdefghijklmnopqrstuvwxyz0123456789', 8))
+            volname = 'retro-contest-tmp%s' % rand
+            socket_vol = client.volumes.create(volname, driver='local', driver_opts={'type': 'tmpfs', 'device': 'tmpfs'})
+            socket_vols.append(socket_vol)
+            print("Remote command " + str(i) + " " + str(remote_commands[i]))
+            remote = client.containers.run(remote_name, remote_commands[i],
+                                           volumes={volname: {'bind': '/root/compo/tmp/sock'}, **datamount},
+                                           **remote_kwargs)
+            remotes.append(remote)
+    except:
+        remove_socket_vols()
+        raise
+
+    try:
+        volumes = {volume.name: {'bind': '/root/compo/tmp/sock{0}'.format(i)} for i, volume in enumerate(socket_vols)}
+        agent = client.containers.run(agent_name, agent_command,
+                                      volumes={**volumes, **agentmount},
+                                      runtime=kwargs.get('runtime', 'nvidia'),
+                                      **agent_kwargs)
+    except:
+        remote_socket_vols()
+        remove_remotes()
         raise
 
     a_exit = None
@@ -213,17 +220,9 @@ def run(game, state=None, entry=None, **kwargs):
             with open(os.path.join(results, 'agent-stderr.txt'), 'w') as f:
                 f.write(logs['agent'][2].decode('utf-8'))
 
-        for remote in remotes:
-            try:
-                remote.kill()
-            except:
-                pass
-            try:
-                remote.remove()
-            except:
-                pass
-        agent.remove()
-        [socket_vol.remove() for socket_vol in socket_vols.values()]
+        remove_socket_vols()
+        remove_remotes()
+        agent.remove(v=True)
 
     return logs
 
