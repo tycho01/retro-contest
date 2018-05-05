@@ -118,8 +118,11 @@ def run(game, state=None, entry=None, **kwargs):
                                       **agent_kwargs)
     except:
         for remote in remotes:
-            remote.kill()
-            remote.remove()
+            try:
+                remote.kill()
+            try:
+                remote.remove()
+
         [socket_vol.remove() for socket_vol in socket_vols.values()]
         raise
 
@@ -209,8 +212,10 @@ def run(game, state=None, entry=None, **kwargs):
                 f.write(logs['agent'][2].decode('utf-8'))
 
         for remote in remotes:
-            remote.kill()
-            remote.remove()
+            try:
+                remote.kill()
+            try:
+                remote.remove()
         agent.remove()
         [socket_vol.remove() for socket_vol in socket_vols.values()]
 
