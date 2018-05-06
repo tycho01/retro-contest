@@ -38,7 +38,8 @@ def run_args(args):
         bk2dir=args.bk2dir,
         monitordir=args.monitordir,
         discrete_actions=args.discrete_actions,
-        daemonize=args.daemonize)
+        daemonize=args.daemonize,
+        socketdir=args.socketdir)
 
 
 def list_games(args):
@@ -81,6 +82,7 @@ def main(argv=sys.argv[1:]):
     parser_run.add_argument('--wallclock-limit', '-W', type=float, default=None, help='Maximum time to run in seconds')
     parser_run.add_argument('--timestep-limit', '-T', type=int, default=None, help='Maximum time to run in timesteps')
     parser_run.add_argument('--discrete-actions', '-D', action='store_true', help='Use a discrete action space')
+    parser_run.add_argument('--socketdir', '-s', type=str, help='Path to the socket used by the remote environment')
 
     parser_list.set_defaults(func=lambda args: parser_list.print_help())
     subparsers_list = parser_list.add_subparsers()

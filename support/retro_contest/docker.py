@@ -43,20 +43,30 @@ def convert_path(path):
     return path
 
 
-def run(game, state=None, entry=None, **kwargs):
+def run(game_state_strs, entry=None, **kwargs):
+    game_state_pairs = []
+    for game_state_str in game_state_strs:
+        words = game_state_str.split(':')
+        if len(words) >= 1:
+            game_state_pair = (words[0], None)
+            if len(words) >= 2:
+                game_state_pair[1] = words[1]
+            game_state_pairs.append(game_state_pair)
+
     client = docker.from_env()
-    remote_command = ['retro-contest-remote', 'run', game, *([state] if state else []), '-b', 'results/bk2', '-m', 'results']
+    remote_command_prefix = ['retro-contest-remote', 'run']
+    remote_command_suffix = ['-b', 'results/bk2', '-m', 'results']
     remote_name = kwargs.get('remote_env', 'openai/retro-env')
     agent_command = []
     agent_name = kwargs.get('agent', 'agent')
     datamount = {}
 
     if kwargs.get('wallclock_limit') is not None:
-        remote_command.extend(['-W', str(kwargs['wallclock_limit'])])
+        remote_command_suffix.extend(['-W', str(kwargs['wallclock_limit'])])
     if kwargs.get('timestep_limit') is not None:
-        remote_command.extend(['-T', str(kwargs['timestep_limit'])])
+        remote_command_suffix.extend(['-T', str(kwargs['timestep_limit'])])
     if kwargs.get('discrete_actions'):
-        remote_command.extend(['-D'])
+        remote_command_suffix.extend(['-D'])
 
     if entry:
         agent_command.append(entry)
@@ -64,7 +74,7 @@ def run(game, state=None, entry=None, **kwargs):
             agent_command.extend(kwargs['entry_args'])
 
     rand = ''.join(random.sample('abcdefghijklmnopqrstuvwxyz0123456789', 8))
-    volname = 'retro-contest-tmp%s' % rand
+    volname_prefix = 'retro-contest-tmp%s' % rand
     datamount = {}
     agentmount = {}
     if kwargs.get('resultsdir'):
@@ -86,34 +96,50 @@ def run(game, state=None, entry=None, **kwargs):
     if kwargs.get('agent_shm'):
         agent_kwargs['shm_size'] = kwargs['agent_shm']
 
-    bridge = client.volumes.create(volname, driver='local', driver_opts={'type': 'tmpfs', 'device': 'tmpfs'})
     if kwargs.get('use_host_data'):
-        remote_command = [remote_command[0], '--data-dir', '/root/data', *remote_command[1:]]
+        remote_command_prefix = [remote_command_prefix[0], '--data-dir', '/root/data', *remote_command_prefix[1:]]
         datamount[convert_path(data_path())] = {'bind': '/root/data', 'mode': 'ro'}
 
-    try:
-        remote = client.containers.run(remote_name, remote_command,
-                                       volumes={volname: {'bind': '/root/compo/tmp'},
-                                                **datamount},
-                                       **remote_kwargs)
-    except:
-        bridge.remove()
-        raise
+    remotes = []
+    bridges = []
+    volnames = []
+    for i, (game, state) in enumerate(game_state_pairs):
+        volname = '%s-%n' % (volname_prefix, i)
+        volnames.append(volname)
+        bridges.append(client.volumes.create(volname, driver='local', driver_opts={'type': 'tmpfs', 'device': 'tmpfs'}))
+        remote_command = [*remote_command_prefix, game, *([state] if state else []), *remote_command_suffix]
+        try:
+            remote = client.containers.run(remote_name, remote_command,
+                                           volumes={volname: {'bind': '/root/compo/tmp'},
+                                                    **datamount},
+                                           **remote_kwargs)
+        except:
+            for remote in remotes:
+                remote.kill()
+                remote.remove()
+            for bridge in bridges:
+                bridge.remove()
+            raise
+        remotes.append(remote)
 
     try:
+        volmounts = {}
+        for i, volname in enumerate(volnames):
+            volmounts[volname] = {'bind': '/root/compo/tmp%n' % i}
         agent = client.containers.run(agent_name, agent_command,
-                                      volumes={volname: {'bind': '/root/compo/tmp'},
-                                                **agentmount},
+                                      volumes={**volmounts, **agentmount},
                                       runtime=kwargs.get('runtime', 'nvidia'),
                                       **agent_kwargs)
     except:
-        remote.kill()
-        remote.remove()
-        bridge.remove()
+        for remote in remotes:
+            remote.kill()
+            remote.remove()
+        for bridge in bridges:
+            bridge.remove()
         raise
 
     a_exit = None
-    r_exit = None
+    r_exits = [None for _ in remotes]
 
     if not kwargs.get('quiet'):
         log_thread = LogThread(agent)
@@ -126,22 +152,24 @@ def run(game, state=None, entry=None, **kwargs):
                 break
             except requests.exceptions.RequestException:
                 pass
-            try:
-                r_exit = remote.wait(timeout=5)
-                break
-            except requests.exceptions.RequestException:
-                pass
+            for i, remote in enumerate(remotes):
+                try:
+                    r_exits[i] = remote.wait(timeout=5)
+                    break
+                except requests.exceptions.RequestException:
+                    pass
 
         if a_exit is None:
             try:
                 a_exit = agent.wait(timeout=10)
             except requests.exceptions.RequestException:
                 agent.kill()
-        if r_exit is None:
-            try:
-                r_exit = remote.wait(timeout=10)
-            except requests.exceptions.RequestException:
-                remote.kill()
+        for i, remote in enumerate(remotes):
+            if r_exits[i] is None:
+                try:
+                    r_exits[i] = remote.wait(timeout=10)
+                except requests.exceptions.RequestException:
+                    remote.kill()
     except:
         if a_exit is None:
             try:
@@ -151,47 +179,51 @@ def run(game, state=None, entry=None, **kwargs):
                     agent.kill()
                 except docker.errors.APIError:
                     pass
-        if r_exit is None:
-            try:
-                r_exit = remote.wait(timeout=1)
-            except:
+        for i, remote in enumerate(remotes):
+            if r_exits[i] is None:
                 try:
-                    remote.kill()
-                except docker.errors.APIError:
-                    pass
+                    r_exits[i] = remote.wait(timeout=1)
+                except:
+                    try:
+                        remote.kill()
+                    except docker.errors.APIError:
+                        pass
         raise
     finally:
         if isinstance(a_exit, dict):
             a_exit = a_exit.get('StatusCode')
-        if isinstance(r_exit, dict):
-            r_exit = r_exit.get('StatusCode')
+        for r_exit in r_exits:
+            if isinstance(r_exit, dict):
+                r_exit = r_exit.get('StatusCode')
 
         if not kwargs.get('quiet'):
             log_thread.exit()
 
         logs = {
-            'remote': (r_exit, remote.logs(stdout=True, stderr=False), remote.logs(stdout=False, stderr=True)),
             'agent': (a_exit, agent.logs(stdout=True, stderr=False), agent.logs(stdout=False, stderr=True))
         }
 
-        if results:
-            with open(os.path.join(results, 'remote-stdout.txt'), 'w') as f:
-                f.write(logs['remote'][1].decode('utf-8'))
-            with open(os.path.join(results, 'remote-stderr.txt'), 'w') as f:
-                f.write(logs['remote'][2].decode('utf-8'))
-            with open(os.path.join(results, 'agent-stdout.txt'), 'w') as f:
-                f.write(logs['agent'][1].decode('utf-8'))
-            with open(os.path.join(results, 'agent-stderr.txt'), 'w') as f:
-                f.write(logs['agent'][2].decode('utf-8'))
+        for i, remote in enumerate(remotes):
+            logs['remote%n' % i] = (r_exits[i], remote.logs(stdout=True, stderr=False), remote.logs(stdout=False, stderr=True))
 
-        remote.remove()
+
+        if results:
+            for log_name, (_, log_out, log_err) in logs.items():
+                with open(os.path.join(results, '%s-stdout.txt' % log_name), 'w') as f:
+                    f.write(log_out.decode('utf-8'))
+                with open(os.path.join(results, '%s-stderr.txt' % log_name), 'w') as f:
+                    f.write(log_err.decode('utf-8'))
+
+        for remote in remotes:
+            remote.remove()
         agent.remove()
-        bridge.remove()
+        for bridge in bridges:
+            bridge.remove()
 
     return logs
 
 
-def run_args(args):
+def run_multi_env_args(args):
     kwargs = {
         'entry_args': args.args,
         'wallclock_limit': args.wallclock_limit,
@@ -213,14 +245,18 @@ def run_args(args):
     if args.remote_env:
         kwargs['remote_env'] = args.remote_env
 
-    results = run(args.game, args.state, args.entry, **kwargs)
-    if results['remote'][0] or results['agent'][0]:
-        if results['remote'][0]:
-            print('Remote exited uncleanly:', results['remote'][0])
-        if results['agent'][0]:
-            print('Agent exited uncleanly', results['agent'][0])
-        return False
-    return True
+    results = run(args.game_state_pairs, args.entry, **kwargs)
+    exited_cleanly = True
+    for log_name, (exit_code, _, _) in results:
+        if exit_code:
+            exited_cleanly = False
+            print('%s exited uncleanly:' % log_name, exit_code)
+    return exited_cleanly
+
+
+def run_args(args):
+    args.game_state_pairs = ['%s:%s' % (args.game, args.state)]
+    return run_multi_env_args(args)
 
 
 def build(path, tag, install=None, pass_env=False):
@@ -298,6 +334,23 @@ def init_parser(subparsers):
     parser_run.add_argument('--use-host-data', '-d', action='store_true', help='Use the host Gym Retro data directory')
     parser_run.add_argument('--quiet', '-q', action='store_true', help='Disable printing agent logs')
     parser_run.add_argument('--agent-shm', type=str, help='Agent /dev/shm size')
+
+    parser_run_multi_env = subparsers.add_parser('run-multi-env', description='Run Docker containers locally, using multiple environments with one agent')
+    parser_run_multi_env.set_defaults(func=run_multi_env_args)
+    parser_run_multi_env.add_argument('game_state_pairs', type=str, nargs='+' help='List of one or more game-state pairs to run, each one of the form "game:state"')
+    parser_run_multi_env.add_argument('--entry', '-e', type=str, help='Name of agent entry point')
+    parser_run_multi_env.add_argument('--args', '-A', type=str, nargs='+', help='Extra agent entry arguments')
+    parser_run_multi_env.add_argument('--agent', '-a', type=str, help='Extra agent Docker image')
+    parser_run_multi_env.add_argument('--wallclock-limit', '-W', type=float, default=None, help='Maximum time to run in seconds')
+    parser_run_multi_env.add_argument('--timestep-limit', '-T', type=int, default=None, help='Maximum time to run in timesteps')
+    parser_run_multi_env.add_argument('--no-nv', '-N', action='store_true', help='Disable Nvidia runtime')
+    parser_run_multi_env.add_argument('--remote-env', '-R', type=str, help='Remote Docker image')
+    parser_run_multi_env.add_argument('--results-dir', '-r', type=str, help='Path to output results')
+    parser_run_multi_env.add_argument('--agent-dir', '-o', type=str, help='Path to mount into agent (mounted at /root/compo/out)')
+    parser_run_multi_env.add_argument('--discrete-actions', '-D', action='store_true', help='Use a discrete action space')
+    parser_run_multi_env.add_argument('--use-host-data', '-d', action='store_true', help='Use the host Gym Retro data directory')
+    parser_run_multi_env.add_argument('--quiet', '-q', action='store_true', help='Disable printing agent logs')
+    parser_run_multi_env.add_argument('--agent-shm', type=str, help='Agent /dev/shm size')
 
     parser_build = subparsers.add_parser('build', description='Build agent Docker containers')
     parser_build.set_defaults(func=build_args)
