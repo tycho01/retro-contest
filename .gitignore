@@ -8,3 +8,9 @@ roms
 *.bk2
 *.mp4
 *.ipynb_checkpoints
+roms/*.smd
+roms/*.SGD
+roms/*.bin
+roms/*.68K
+**.swp
+**.swo
